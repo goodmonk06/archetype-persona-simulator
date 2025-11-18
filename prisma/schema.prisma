@@ -1,0 +1,84 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Core persona definition
+model Persona {
+  id                   String                  @id @default(cuid())
+  key                  String                  @unique // URL-friendly identifier (e.g., "warm-mentor")
+  name                 String
+  archetypeGroup       String                  // e.g., "Mentor", "Trickster", "Guardian"
+  descriptionMarkdown  String                  @db.Text
+  primaryValuesJson    String                  @db.Text // JSON array of core values
+  shadowAspectsJson    String?                 @db.Text // JSON array of shadow/negative aspects
+  createdAt            DateTime                @default(now())
+  updatedAt            DateTime                @updatedAt
+
+  promptProfile        PersonaPromptProfile?
+  testScenarios        PersonaTestScenario[]
+  responseLogs         PersonaResponseLog[]
+
+  @@index([key])
+  @@index([archetypeGroup])
+}
+
+// Prompt configuration for persona
+model PersonaPromptProfile {
+  id                      String   @id @default(cuid())
+  personaId               String   @unique
+  systemPromptMarkdown    String   @db.Text
+  styleGuidelinesMarkdown String   @db.Text
+  exampleDialoguesJson    String   @db.Text // JSON array of {user: string, assistant: string}
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  persona                 Persona  @relation(fields: [personaId], references: [id], onDelete: Cascade)
+
+  @@index([personaId])
+}
+
+// Test scenarios to validate persona behavior
+model PersonaTestScenario {
+  id                              String   @id @default(cuid())
+  personaId                       String
+  title                           String
+  inputPrompt                     String   @db.Text
+  expectedToneDescriptionMarkdown String   @db.Text
+  createdAt                       DateTime @default(now())
+  updatedAt                       DateTime @updatedAt
+
+  persona                         Persona  @relation(fields: [personaId], references: [id], onDelete: Cascade)
+  responseLogs                    PersonaResponseLog[]
+
+  @@index([personaId])
+}
+
+// Log of all persona responses
+model PersonaResponseLog {
+  id           String                @id @default(cuid())
+  personaId    String
+  scenarioId   String?               // null if not from a test scenario
+  inputPrompt  String                @db.Text
+  outputText   String                @db.Text
+  metadataJson String                @db.Text // JSON with model, tokens, duration, etc.
+  createdAt    DateTime              @default(now())
+
+  persona      Persona               @relation(fields: [personaId], references: [id], onDelete: Cascade)
+  scenario     PersonaTestScenario?  @relation(fields: [scenarioId], references: [id], onDelete: SetNull)
+
+  @@index([personaId])
+  @@index([scenarioId])
+  @@index([createdAt])
+}
