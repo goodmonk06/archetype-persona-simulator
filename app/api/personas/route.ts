@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { z } from 'zod';
+import { withErrorHandler, successResponse, createdResponse } from '@/lib/apiHandler';
+import { ValidationError, ConflictError } from '@/lib/errors';
 
 // Validation schemas
 const createPersonaSchema = z.object({
@@ -26,82 +28,55 @@ const createPersonaSchema = z.object({
  * GET /api/personas
  * List all personas
  */
-export async function GET() {
-  try {
-    const personas = await prisma.persona.findMany({
-      include: {
-        promptProfile: true,
-        _count: {
-          select: {
-            testScenarios: true,
-            responseLogs: true,
-          },
+export const GET = withErrorHandler(async () => {
+  const personas = await prisma.persona.findMany({
+    include: {
+      promptProfile: true,
+      _count: {
+        select: {
+          testScenarios: true,
+          responseLogs: true,
         },
       },
-      orderBy: {
-        createdAt: 'desc',
-      },
-    });
+    },
+    orderBy: {
+      createdAt: 'desc',
+    },
+  });
 
-    return NextResponse.json(personas);
-  } catch (error) {
-    console.error('Error fetching personas:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch personas' },
-      { status: 500 }
-    );
-  }
-}
+  return successResponse(personas);
+});
 
 /**
  * POST /api/personas
  * Create a new persona
  */
-export async function POST(request: Request) {
-  try {
-    const body = await request.json();
-    const validated = createPersonaSchema.parse(body);
+export const POST = withErrorHandler(async (request: Request) => {
+  const body = await request.json();
+  const validated = createPersonaSchema.parse(body);
 
-    // Check if key already exists
-    const existing = await prisma.persona.findUnique({
-      where: { key: validated.key },
-    });
+  // Check if key already exists
+  const existing = await prisma.persona.findUnique({
+    where: { key: validated.key },
+  });
 
-    if (existing) {
-      return NextResponse.json(
-        { error: 'A persona with this key already exists' },
-        { status: 400 }
-      );
-    }
-
-    const persona = await prisma.persona.create({
-      data: {
-        key: validated.key,
-        name: validated.name,
-        archetypeGroup: validated.archetypeGroup,
-        descriptionMarkdown: validated.descriptionMarkdown,
-        primaryValuesJson: validated.primaryValuesJson,
-        shadowAspectsJson: validated.shadowAspectsJson,
-      },
-      include: {
-        promptProfile: true,
-      },
-    });
-
-    return NextResponse.json(persona, { status: 201 });
-  } catch (error) {
-    console.error('Error creating persona:', error);
-
-    if (error instanceof z.ZodError) {
-      return NextResponse.json(
-        { error: 'Validation failed', details: error.errors },
-        { status: 400 }
-      );
-    }
-
-    return NextResponse.json(
-      { error: 'Failed to create persona' },
-      { status: 500 }
-    );
+  if (existing) {
+    throw new ConflictError(`A persona with key '${validated.key}' already exists`);
   }
-}
+
+  const persona = await prisma.persona.create({
+    data: {
+      key: validated.key,
+      name: validated.name,
+      archetypeGroup: validated.archetypeGroup,
+      descriptionMarkdown: validated.descriptionMarkdown,
+      primaryValuesJson: validated.primaryValuesJson,
+      shadowAspectsJson: validated.shadowAspectsJson,
+    },
+    include: {
+      promptProfile: true,
+    },
+  });
+
+  return createdResponse(persona);
+});

@@ -23,15 +23,28 @@ model Persona {
   descriptionMarkdown  String                  @db.Text
   primaryValuesJson    String                  @db.Text // JSON array of core values
   shadowAspectsJson    String?                 @db.Text // JSON array of shadow/negative aspects
+  tagsJson             String                  @default("[]") @db.Text // JSON array of tags
+  metadataJson         String                  @default("{}") @db.Text // JSON object for extensible metadata
+  isActive             Boolean                 @default(true)
+  visibility           String                  @default("private") // "private", "public", "shared"
+  templateId           String?                 // Reference to template if created from one
   createdAt            DateTime                @default(now())
   updatedAt            DateTime                @updatedAt
 
   promptProfile        PersonaPromptProfile?
   testScenarios        PersonaTestScenario[]
   responseLogs         PersonaResponseLog[]
+  collections          PersonaCollectionMember[]
+  conversationThreads  ConversationThread[]
+  analytics            PersonaAnalytics?
+  versions             PersonaVersion[]
+  template             PersonaTemplate?        @relation(fields: [templateId], references: [id])
 
   @@index([key])
   @@index([archetypeGroup])
+  @@index([isActive])
+  @@index([visibility])
+  @@index([templateId])
 }
 
 // Prompt configuration for persona
@@ -56,6 +69,8 @@ model PersonaTestScenario {
   title                           String
   inputPrompt                     String   @db.Text
   expectedToneDescriptionMarkdown String   @db.Text
+  executionStatus                 String   @default("pending") // "pending", "running", "completed", "failed"
+  lastExecutedAt                  DateTime?
   createdAt                       DateTime @default(now())
   updatedAt                       DateTime @updatedAt
 
@@ -63,22 +78,138 @@ model PersonaTestScenario {
   responseLogs                    PersonaResponseLog[]
 
   @@index([personaId])
+  @@index([executionStatus])
 }
 
-// Log of all persona responses
+// Log of all persona responses (enhanced)
 model PersonaResponseLog {
-  id           String                @id @default(cuid())
-  personaId    String
-  scenarioId   String?               // null if not from a test scenario
-  inputPrompt  String                @db.Text
-  outputText   String                @db.Text
-  metadataJson String                @db.Text // JSON with model, tokens, duration, etc.
-  createdAt    DateTime              @default(now())
+  id              String                @id @default(cuid())
+  personaId       String
+  scenarioId      String?               // null if not from a test scenario
+  threadId        String?               // null if not part of conversation thread
+  inputPrompt     String                @db.Text
+  outputText      String                @db.Text
+  metadataJson    String                @db.Text // JSON with model, tokens, duration, etc.
+  feedbackRating  Int?                  // 1-5 rating if provided
+  feedbackComment String?               @db.Text
+  createdAt       DateTime              @default(now())
 
-  persona      Persona               @relation(fields: [personaId], references: [id], onDelete: Cascade)
-  scenario     PersonaTestScenario?  @relation(fields: [scenarioId], references: [id], onDelete: SetNull)
+  persona         Persona               @relation(fields: [personaId], references: [id], onDelete: Cascade)
+  scenario        PersonaTestScenario?  @relation(fields: [scenarioId], references: [id], onDelete: SetNull)
+  thread          ConversationThread?   @relation(fields: [threadId], references: [id], onDelete: SetNull)
 
   @@index([personaId])
   @@index([scenarioId])
+  @@index([threadId])
+  @@index([createdAt])
+  @@index([feedbackRating])
+}
+
+// Templates for quick persona creation
+model PersonaTemplate {
+  id                   String    @id @default(cuid())
+  key                  String    @unique
+  name                 String
+  archetypeGroup       String
+  descriptionMarkdown  String    @db.Text
+  primaryValuesJson    String    @db.Text
+  shadowAspectsJson    String?   @db.Text
+  defaultPromptProfile String    @db.Text // JSON with default prompt profile
+  tagsJson             String    @default("[]") @db.Text
+  isPublic             Boolean   @default(false)
+  usageCount           Int       @default(0)
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  personas             Persona[]
+
+  @@index([key])
+  @@index([archetypeGroup])
+  @@index([isPublic])
+}
+
+// Collections to group related personas
+model PersonaCollection {
+  id              String                    @id @default(cuid())
+  key             String                    @unique
+  name            String
+  descriptionMarkdown String?               @db.Text
+  tagsJson        String                    @default("[]") @db.Text
+  visibility      String                    @default("private") // "private", "public", "shared"
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
+
+  members         PersonaCollectionMember[]
+
+  @@index([key])
+  @@index([visibility])
+}
+
+// Many-to-many relationship between personas and collections
+model PersonaCollectionMember {
+  id           String             @id @default(cuid())
+  collectionId String
+  personaId    String
+  order        Int                @default(0)
+  addedAt      DateTime           @default(now())
+
+  collection   PersonaCollection  @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  persona      Persona            @relation(fields: [personaId], references: [id], onDelete: Cascade)
+
+  @@unique([collectionId, personaId])
+  @@index([collectionId])
+  @@index([personaId])
+}
+
+// Multi-turn conversation threads
+model ConversationThread {
+  id           String               @id @default(cuid())
+  personaId    String
+  title        String?
+  contextJson  String               @default("{}") @db.Text
+  startedAt    DateTime             @default(now())
+  lastActiveAt DateTime             @default(now())
+  turnCount    Int                  @default(0)
+  isActive     Boolean              @default(true)
+
+  persona      Persona              @relation(fields: [personaId], references: [id], onDelete: Cascade)
+  messages     PersonaResponseLog[]
+
+  @@index([personaId])
+  @@index([isActive])
+  @@index([lastActiveAt])
+}
+
+// Analytics and metrics per persona
+model PersonaAnalytics {
+  id                    String   @id @default(cuid())
+  personaId             String   @unique
+  totalResponses        Int      @default(0)
+  averageResponseTime   Float    @default(0)
+  totalTokensUsed       Int      @default(0)
+  averageFeedbackRating Float?
+  lastResponseAt        DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  persona               Persona  @relation(fields: [personaId], references: [id], onDelete: Cascade)
+
+  @@index([personaId])
+}
+
+// Version history for persona configurations
+model PersonaVersion {
+  id                   String   @id @default(cuid())
+  personaId            String
+  versionNumber        Int
+  changeDescription    String?  @db.Text
+  snapshotJson         String   @db.Text // Full persona + profile snapshot
+  createdAt            DateTime @default(now())
+  createdBy            String?  // User ID if available
+
+  persona              Persona  @relation(fields: [personaId], references: [id], onDelete: Cascade)
+
+  @@unique([personaId, versionNumber])
+  @@index([personaId])
   @@index([createdAt])
 }

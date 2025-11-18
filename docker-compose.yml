@@ -18,6 +18,32 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - archetype-network
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: archetype-persona-app
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/archetype_persona_simulator?schema=public"
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      NODE_ENV: production
+      NEXT_PUBLIC_APP_URL: "http://localhost:3000"
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - archetype-network
+    command: sh -c "npx prisma migrate deploy && npm start"
+
+networks:
+  archetype-network:
+    driver: bridge
 
 volumes:
   postgres_data:
